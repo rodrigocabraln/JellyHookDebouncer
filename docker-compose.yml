@@ -1,0 +1,39 @@
+services:
+  jellyhook-debouncer:
+    build: .
+    container_name: jellyhook-debouncer
+    restart: unless-stopped
+
+    # Pass environment variables from .env
+    env_file:
+      - .env
+
+    # Map port (host:container)
+    ports:
+      - "${PORT:-8099}:${PORT:-8099}"
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${PORT:-8099}/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+
+    # Read-only root filesystem (app doesn't need to write)
+    read_only: true
+
+    # Minimal capabilities
+    cap_drop:
+      - ALL

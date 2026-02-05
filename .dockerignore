@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+
+# Environment files (passed via env_file in docker-compose)
+.env_claude
+.env_claude.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Logs
+logs/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+
+# Documentation
+README.md
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore

@@ -1,0 +1,17 @@
+# Configuration with real credentials
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Logs (captured webhook events)
+logs/
+
+# Virtual environments
+venv/
+env/
+ENV/
