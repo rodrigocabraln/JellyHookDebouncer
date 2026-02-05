@@ -59,6 +59,11 @@ In your Jellyfin Dashboard, go to **Plugins → Webhooks**:
 | `CREDITS_THRESHOLD_PCT` | 95 | % of progress to trigger `media_end` |
 | `ALLOWED_DEVICES` | (all) | Comma-separated list of devices to process |
 
+> **⚠️ Networking note**: The event flow requires two connections:
+> `Jellyfin → :8099 → JellyHookDebouncer → :8123 → Home Assistant`
+>
+> Make sure your firewall allows Jellyfin to reach port `8099` and JellyHookDebouncer to reach Home Assistant on port `8123`. If running in Docker, evaluate your environment — firewalls like `ufw` or `firewalld` may require additional rules for both inbound and outbound traffic on the container.
+
 ---
 
 ## 📡 Events Emitted
