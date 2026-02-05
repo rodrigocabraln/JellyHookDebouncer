@@ -30,9 +30,9 @@ Jellyfin's native webhook system presents two major challenges for automation (l
    # Edit .env and set your HA_WEBHOOK_URL
    ```
 
-3. **Launch**:
+3. **Build and launch**:
    ```bash
-   docker compose up -d
+   docker compose up -d --build
    ```
 
 ---
