@@ -35,6 +35,11 @@ Jellyfin's native webhook system presents two major challenges for automation (l
    docker compose up -d --build
    ```
 
+4. **Check logs**:
+   ```bash
+   docker compose logs -f jellyhook-debouncer
+   ```
+
 ---
 
 ## ⚙️ Configuration
