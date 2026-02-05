@@ -20,7 +20,7 @@ Jellyfin's native webhook system presents two major challenges for automation (l
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/your-repo/JellyHookDebouncer.git
+   git clone https://github.com/rodrigocabraln/JellyHookDebouncer.git
    cd JellyHookDebouncer
    ```
 
