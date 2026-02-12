@@ -43,7 +43,7 @@ PAUSE_DEBOUNCE_SECS: float = float(os.environ.get("PAUSE_DEBOUNCE_SECS", "5"))
 CREDITS_THRESHOLD_PCT: float = float(os.environ.get("CREDITS_THRESHOLD_PCT", "95"))
 ALLOWED_DEVICES_RAW: str = os.environ.get("ALLOWED_DEVICES", "")
 ALLOWED_DEVICES: set[str] = (
-    {d.strip() for d in ALLOWED_DEVICES_RAW.split(",") if d.strip()}
+    {d.strip().lower() for d in ALLOWED_DEVICES_RAW.split(",") if d.strip()}
     if ALLOWED_DEVICES_RAW else set()
 )
 LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -136,7 +136,7 @@ def process_event(body: dict) -> None:
         return
 
     # Filter by device name if configured
-    if ALLOWED_DEVICES and device_name not in ALLOWED_DEVICES:
+    if ALLOWED_DEVICES and device_name.strip().lower() not in ALLOWED_DEVICES:
         log.debug("SKIP device=%s (not in ALLOWED_DEVICES)", device_name)
         return
 
