@@ -46,6 +46,10 @@ ALLOWED_DEVICES: set[str] = (
     {d.strip().lower() for d in ALLOWED_DEVICES_RAW.split(",") if d.strip()}
     if ALLOWED_DEVICES_RAW else set()
 )
+JELLYFIN_URL: str = os.environ.get("JELLYFIN_URL", "").rstrip("/")
+JELLYFIN_API_KEY: str = os.environ.get("JELLYFIN_API_KEY", "")
+
+
 LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
@@ -70,6 +74,7 @@ class Session:
     state: str = "idle"                  # idle | playing | paused
     last_position_ticks: int = 0
     media_end_emitted: bool = False
+    credits_start_ticks: int | None = None  # from chapter data
     _pause_timer: threading.Timer | None = field(default=None, repr=False)
     _debouncing: bool = False            # True while waiting for debounce
 
@@ -82,6 +87,42 @@ class Session:
 
 sessions: dict[str, Session] = {}
 _lock = threading.Lock()
+
+# ── Fetch chapter-based credits position ──────────────────────────────────────
+
+def _fetch_credits_ticks(item_id: str) -> int | None:
+    """Query Jellyfin API for the item's chapters and return the start
+    position (in ticks) of the last chapter, or None if no chapters exist.
+    The last chapter of a media file is always the credits."""
+    if not JELLYFIN_URL or not JELLYFIN_API_KEY:
+        return None
+
+    url = f"{JELLYFIN_URL}/Items/{item_id}?Fields=Chapters"
+    req = urllib.request.Request(
+        url,
+        headers={"Authorization": f'MediaBrowser Token="{JELLYFIN_API_KEY}"'},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+    except Exception as e:
+        log.warning("Could not fetch chapters for %s: %s", item_id, e)
+        return None
+
+    chapters: list[dict] = data.get("Chapters", [])
+    if not chapters:
+        return None
+
+    # The last chapter is always the credits
+    last = chapters[-1]
+    ticks = last.get("StartPositionTicks", 0)
+    log.info(
+        "CHAPTERS  item=%s  last chapter '%s' at tick %s (%.1f%%)",
+        item_id, last.get("Name"), ticks,
+        ticks / data.get("RunTimeTicks", 1) * 100,
+    )
+    return ticks
 
 # ── Notify Home Assistant ─────────────────────────────────────────────────────
 
@@ -163,6 +204,7 @@ def process_event(body: dict) -> None:
             s.cancel_pause_timer()
             s.item_id = item_id
             s.media_end_emitted = False
+            s.credits_start_ticks = None
 
         log.debug(
             "IN   %-18s  device=%-15s  paused=%s  pos=%s  state=%s  debouncing=%s",
@@ -177,6 +219,25 @@ def process_event(body: dict) -> None:
             s.last_position_ticks = position_ticks
             s.state = "playing"
             s.media_end_emitted = False
+            # Fetch chapter-based credits position in background
+            if item_id:
+                def _load_chapters(iid=item_id, did=device_id):
+                    ticks = _fetch_credits_ticks(iid)
+                    with _lock:
+                        ss = sessions.get(did)
+                        if ss and ss.item_id == iid:
+                            ss.credits_start_ticks = ticks
+                            if ticks is not None:
+                                log.info(
+                                    "CREDITS   device=%-15s  using chapter at tick %s",
+                                    ss.device_name, ticks,
+                                )
+                            else:
+                                log.info(
+                                    "CREDITS   device=%-15s  no chapter found, using %s%% fallback",
+                                    ss.device_name, CREDITS_THRESHOLD_PCT,
+                                )
+                threading.Thread(target=_load_chapters, daemon=True).start()
             emit("PlaybackStart", s)
             return
 
@@ -196,21 +257,27 @@ def process_event(body: dict) -> None:
         prev_position = s.last_position_ticks
         s.last_position_ticks = position_ticks
 
+        # -- Determine credits threshold --
+        if s.credits_start_ticks is not None:
+            # Chapter-based detection (precise)
+            in_credits = position_ticks >= s.credits_start_ticks
+            was_before_credits = prev_position < s.credits_start_ticks
+        elif s.run_time_ticks > 0:
+            # Percentage-based fallback
+            pct = position_ticks / s.run_time_ticks * 100
+            in_credits = pct >= CREDITS_THRESHOLD_PCT
+            was_before_credits = (prev_position / s.run_time_ticks * 100) < CREDITS_THRESHOLD_PCT
+        else:
+            in_credits = False
+            was_before_credits = False
+
         # -- Reset media_end if user seeks backward below threshold --
-        if (
-            s.media_end_emitted
-            and s.run_time_ticks > 0
-            and position_ticks / s.run_time_ticks * 100 < CREDITS_THRESHOLD_PCT
-        ):
+        if s.media_end_emitted and not in_credits:
             s.media_end_emitted = False
             log.debug("  media_end reset — user seeked back below credits threshold")
 
         # -- Check media_end (credits) --
-        if (
-            not s.media_end_emitted
-            and s.run_time_ticks > 0
-            and position_ticks / s.run_time_ticks * 100 >= CREDITS_THRESHOLD_PCT
-        ):
+        if not s.media_end_emitted and in_credits:
             s.cancel_pause_timer()
             s.media_end_emitted = True
             s.state = "idle"
@@ -306,8 +373,9 @@ def main() -> None:
     log.info("Jellyfin → HA wrapper")
     log.info("  Listen:           0.0.0.0:%s", PORT)
     log.info("  HA webhook:       %s", HA_WEBHOOK_URL or "(not set)")
+    log.info("  Jellyfin API:     %s", JELLYFIN_URL or "(not set — chapter detection disabled)")
     log.info("  Pause debounce:   %ss", PAUSE_DEBOUNCE_SECS)
-    log.info("  Credits at:       %s%%", CREDITS_THRESHOLD_PCT)
+    log.info("  Credits fallback: %s%%", CREDITS_THRESHOLD_PCT)
     if ALLOWED_DEVICES:
         log.info("  Allowed devices:  %s", ", ".join(sorted(ALLOWED_DEVICES)))
     else:
