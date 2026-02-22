@@ -48,7 +48,7 @@ ALLOWED_DEVICES: set[str] = (
 )
 JELLYFIN_URL: str = os.environ.get("JELLYFIN_URL", "").rstrip("/")
 JELLYFIN_API_KEY: str = os.environ.get("JELLYFIN_API_KEY", "")
-
+JELLYFIN_USERNAME: str = os.environ.get("JELLYFIN_USERNAME", "")
 
 LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO").upper()
 
@@ -88,19 +88,52 @@ class Session:
 sessions: dict[str, Session] = {}
 _lock = threading.Lock()
 
+# ── Resolve Jellyfin user ID from username ────────────────────────────────────
+
+def _resolve_jellyfin_user_id() -> str:
+    """Fetch /Users from Jellyfin and return the Id matching JELLYFIN_USERNAME."""
+    if not JELLYFIN_URL or not JELLYFIN_API_KEY or not JELLYFIN_USERNAME:
+        return ""
+
+    url = f"{JELLYFIN_URL}/Users"
+    req = urllib.request.Request(
+        url,
+        headers={"X-Emby-Token": JELLYFIN_API_KEY, "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            users = json.loads(resp.read())
+    except Exception as e:
+        log.error("Could not fetch Jellyfin users: %s", e)
+        return ""
+
+    target = JELLYFIN_USERNAME.strip().lower()
+    for user in users:
+        if (user.get("Name") or "").strip().lower() == target:
+            uid = user["Id"]
+            log.info("Resolved Jellyfin user '%s' → %s", JELLYFIN_USERNAME, uid)
+            return uid
+
+    log.error("Jellyfin user '%s' not found — chapter detection disabled", JELLYFIN_USERNAME)
+    return ""
+
+
+JELLYFIN_USER_ID: str = _resolve_jellyfin_user_id()
+
 # ── Fetch chapter-based credits position ──────────────────────────────────────
 
 def _fetch_credits_ticks(item_id: str) -> int | None:
     """Query Jellyfin API for the item's chapters and return the start
     position (in ticks) of the last chapter, or None if no chapters exist.
     The last chapter of a media file is always the credits."""
-    if not JELLYFIN_URL or not JELLYFIN_API_KEY:
+    if not JELLYFIN_URL or not JELLYFIN_API_KEY or not JELLYFIN_USER_ID:
         return None
 
-    url = f"{JELLYFIN_URL}/Items/{item_id}?Fields=Chapters"
+    url = f"{JELLYFIN_URL}/Users/{JELLYFIN_USER_ID}/Items/{item_id}?Fields=Chapters"
     req = urllib.request.Request(
         url,
-        headers={"Authorization": f'MediaBrowser Token="{JELLYFIN_API_KEY}"'},
+        headers={"X-Emby-Token": JELLYFIN_API_KEY, "Accept": "application/json"},
         method="GET",
     )
     try:
@@ -374,6 +407,8 @@ def main() -> None:
     log.info("  Listen:           0.0.0.0:%s", PORT)
     log.info("  HA webhook:       %s", HA_WEBHOOK_URL or "(not set)")
     log.info("  Jellyfin API:     %s", JELLYFIN_URL or "(not set — chapter detection disabled)")
+    if JELLYFIN_USER_ID:
+        log.info("  Jellyfin user:    %s (%s)", JELLYFIN_USERNAME, JELLYFIN_USER_ID)
     log.info("  Pause debounce:   %ss", PAUSE_DEBOUNCE_SECS)
     log.info("  Credits fallback: %s%%", CREDITS_THRESHOLD_PCT)
     if ALLOWED_DEVICES:

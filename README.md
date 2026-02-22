@@ -60,6 +60,7 @@ In your Jellyfin Dashboard, go to **Plugins → Webhooks**:
 | `CREDITS_THRESHOLD_PCT` | 95 | Fallback % of progress to trigger `media_end` |
 | `JELLYFIN_URL` | (optional) | Jellyfin server URL for chapter-based credits detection |
 | `JELLYFIN_API_KEY` | (optional) | Jellyfin API key (see below) |
+| `JELLYFIN_USERNAME` | (optional) | Jellyfin username to resolve the user ID for API calls |
 | `ALLOWED_DEVICES` | (all) | Comma-separated list of devices to process |
 
 ### 3. Jellyfin API Key (for chapter-based credits detection)
@@ -72,8 +73,9 @@ To enable precise credits detection using chapter data, you need a Jellyfin API 
 4. Give it a name (e.g., "JellyHookDebouncer")
 5. Copy the generated key and set it as `JELLYFIN_API_KEY` in your `.env`
 6. Set `JELLYFIN_URL` to your Jellyfin server address (e.g., `http://10.1.1.X:8096`)
+7. Set `JELLYFIN_USERNAME` to the Jellyfin username (e.g., `admin`)
 
-> **💡 How it works**: When playback starts, the wrapper queries Jellyfin for the media's chapter list. If a chapter named "End Credits" (or similar) is found, its exact start position is used to trigger `media_end`. If no credits chapter exists, the fallback `CREDITS_THRESHOLD_PCT` percentage is used instead.
+> **💡 How it works**: On startup, the wrapper resolves the username to a user ID via the Jellyfin API. When playback starts, it queries for the media's chapter list using `/Users/{userId}/Items/{itemId}?Fields=Chapters`. The last chapter's start position is used to trigger `media_end`. If no chapters exist, the fallback `CREDITS_THRESHOLD_PCT` percentage is used instead.
 
 > **⚠️ Networking note**: The event flow requires two connections:
 > `Jellyfin → :8099 → JellyHookDebouncer → :8123 → Home Assistant`
@@ -211,8 +213,8 @@ All fields from the payload are accessible via `trigger.json`:
 Each device is tracked independently. When a "Pause" arrives, a timer starts. If a "Play" arrives before the timer ends, the pause is discarded as a **Seek Artifact**. If the timer expires, the `pause` event is finally sent to Home Assistant.
 
 ### Credits Detection Priority
-1. **Chapter-based** (precise): If `JELLYFIN_URL` and `JELLYFIN_API_KEY` are configured, the wrapper fetches the media's chapters on playback start. If it finds a chapter matching "End Credits" / "Credits" / "Créditos", it uses that chapter's start position as the trigger point.
-2. **Percentage-based** (fallback): If no credits chapter is found (or the Jellyfin API is not configured), the wrapper falls back to triggering `media_end` at `CREDITS_THRESHOLD_PCT`% of the total runtime.
+1. **Chapter-based** (precise): If `JELLYFIN_URL`, `JELLYFIN_API_KEY`, and `JELLYFIN_USERNAME` are configured, the wrapper resolves the user ID at startup and fetches the media's chapters on playback start. It uses the **last chapter's** start position as the credits trigger point.
+2. **Percentage-based** (fallback): If no chapters are found (or the Jellyfin API is not configured), the wrapper falls back to triggering `media_end` at `CREDITS_THRESHOLD_PCT`% of the total runtime.
 
 ---
 License: MIT
