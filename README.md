@@ -13,6 +13,7 @@ Jellyfin's native webhook system presents two major challenges for automation (l
 - **Clean Events**: Emits clear `play`, `pause`, and `media_end` signals.
 - **Seek Filtering**: Intelligently ignores the false "pause" events created during seeking.
 - **Debounced Pause**: Only confirms a pause if the media stays paused for a configurable duration (e.g., 2 seconds).
+- **Smart Credits Detection**: Uses chapter data from the media file (e.g., "End Credits") for precise detection, with a percentage-based fallback.
 
 ---
 
@@ -56,8 +57,25 @@ In your Jellyfin Dashboard, go to **Plugins → Webhooks**:
 | `HA_WEBHOOK_URL` | (required) | The destination webhook in Home Assistant |
 | `PORT` | 8099 | Port this wrapper listens on |
 | `PAUSE_DEBOUNCE_SECS` | 2 | Seconds to wait before confirming a real pause |
-| `CREDITS_THRESHOLD_PCT` | 95 | % of progress to trigger `media_end` |
+| `CREDITS_THRESHOLD_PCT` | 95 | Fallback % of progress to trigger `media_end` |
+| `JELLYFIN_URL` | (optional) | Jellyfin server URL for chapter-based credits detection |
+| `JELLYFIN_API_KEY` | (optional) | Jellyfin API key (see below) |
+| `JELLYFIN_USERNAME` | (optional) | Jellyfin username to resolve the user ID for API calls |
 | `ALLOWED_DEVICES` | (all) | Comma-separated list of devices to process |
+
+### 3. Jellyfin API Key (for chapter-based credits detection)
+
+To enable precise credits detection using chapter data, you need a Jellyfin API key:
+
+1. Open your Jellyfin Dashboard
+2. Go to **Administration → API Keys**
+3. Click **+** to create a new key
+4. Give it a name (e.g., "JellyHookDebouncer")
+5. Copy the generated key and set it as `JELLYFIN_API_KEY` in your `.env`
+6. Set `JELLYFIN_URL` to your Jellyfin server address (e.g., `http://10.1.1.X:8096`)
+7. Set `JELLYFIN_USERNAME` to the Jellyfin username (e.g., `admin`)
+
+> **💡 How it works**: On startup, the wrapper resolves the username to a user ID via the Jellyfin API. When playback starts, it queries for the media's chapter list using `/Users/{userId}/Items/{itemId}?Fields=Chapters`. The last chapter's start position is used to trigger `media_end`. If no chapters exist, the fallback `CREDITS_THRESHOLD_PCT` percentage is used instead.
 
 > **⚠️ Networking note**: The event flow requires two connections:
 > `Jellyfin → :8099 → JellyHookDebouncer → :8123 → Home Assistant`
@@ -73,7 +91,7 @@ The wrapper sends a simplified JSON to your Home Assistant webhook:
 |-------|-------|
 | `play` | Emitted when playback starts or resumes from a real pause. |
 | `pause` | Emitted only after `PAUSE_DEBOUNCE_SECS` of sustained pause. |
-| `media_end` | Emitted once when progress passes the `CREDITS_THRESHOLD_PCT`. |
+| `media_end` | Emitted when entering the credits chapter (or at `CREDITS_THRESHOLD_PCT` fallback). |
 | `PlaybackStop` | Direct pass-through of the Jellyfin stop event. |
 
 ### Payload Example
@@ -193,6 +211,10 @@ All fields from the payload are accessible via `trigger.json`:
 
 ## 🛠 How It Works
 Each device is tracked independently. When a "Pause" arrives, a timer starts. If a "Play" arrives before the timer ends, the pause is discarded as a **Seek Artifact**. If the timer expires, the `pause` event is finally sent to Home Assistant.
+
+### Credits Detection Priority
+1. **Chapter-based** (precise): If `JELLYFIN_URL`, `JELLYFIN_API_KEY`, and `JELLYFIN_USERNAME` are configured, the wrapper resolves the user ID at startup and fetches the media's chapters on playback start. It uses the **last chapter's** start position as the credits trigger point.
+2. **Percentage-based** (fallback): If no chapters are found (or the Jellyfin API is not configured), the wrapper falls back to triggering `media_end` at `CREDITS_THRESHOLD_PCT`% of the total runtime.
 
 ---
 License: MIT
